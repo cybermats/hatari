@@ -1,0 +1,26 @@
+name: Build and test Hatari on Linux
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    env:
+      SDL_VIDEODRIVER: dummy
+      SDL_AUDIODRIVER: dummy
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install build and GDB test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc g++ make python3 pkg-config \
+            libsdl2-dev zlib1g-dev libpng-dev libreadline-dev \
+            libarchive-dev gdb-multiarch
+      - name: Configure
+        run: cmake -S . -B build -DENABLE_SDL3=OFF
+      - name: Build
+        run: cmake --build build --parallel 2
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --parallel 2
