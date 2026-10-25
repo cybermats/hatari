@@ -1198,6 +1198,31 @@ Hatari creates the indicated FIFO file and reads commands from it.
 Commands can be echoed to FIFO file, and are same as with the control
 socket. Hatari outputs help for unrecognized commands and subcommands
 </p>
+<p class="parameter">--gdb-port &lt;port&gt;</p>
+<p class="paramdesc">
+Serve GDB remote serial protocol on given TCP port of the local host
+(127.0.0.1), for debugging 68000 programs with GDB compatible debuggers.
+When a client connects, emulation stops and the client acts as the
+debugger front end, until it detaches. 0 = disabled (default).
+With stop-on-exec enabled (default), Hatari waits at the first program
+start for the first client to connect.
+The "--gdb-*" options exist only in builds with Unix socket support.
+See <a href="debugger.html#Remote_debugging">debugger manual</a> for details
+</p>
+<p class="parameter">--gdb-stop-on-exec &lt;bool&gt;</p>
+<p class="paramdesc">
+Whether emulation stops at the first instruction of programs started
+from GEMDOS HD emulation (or given on command line) when GDB stub is
+enabled. If no GDB client has connected yet, Hatari always waits for one
+before running the program (default=on)
+</p>
+<p class="parameter">--gdb-offsets &lt;x&gt;</p>
+<p class="paramdesc">
+Type of the program relocation offsets reported to GDB client:
+"segments" (default) reports TEXT, DATA and BSS segment start addresses,
+"text" reports TEXT start address for all of them, which is needed by GDB
+with ELF executables linked to address zero
+</p>
 <p class="parameter">--log-file
 &lt;file&gt;</p>
 <p class="paramdesc">Save log output to &lt;file&gt;

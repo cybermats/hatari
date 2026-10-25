@@ -111,3 +111,12 @@ void GuiEvent_EventHandler(void)
 	GuiEvent_HandleMouseMotion();
 	GuiEvent_HandleMouseButton();
 }
+
+/**
+ * Process events while emulation is stopped (e.g. in remote debugger).
+ * Nothing to do for libretro. Return true if quit was requested.
+ */
+bool GuiEvent_PollQuit(void)
+{
+	return bQuitProgram;
+}

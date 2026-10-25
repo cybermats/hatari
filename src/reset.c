@@ -45,6 +45,8 @@ const char Reset_fileid[] = "Hatari reset.c";
 #include "falcon/dsp.h"
 #include "debugcpu.h"
 #include "debugdsp.h"
+#include "debugui.h"
+#include "gdbstub.h"
 
 /*-----------------------------------------------------------------------*/
 /**
@@ -53,6 +55,9 @@ const char Reset_fileid[] = "Hatari reset.c";
  */
 static int Reset_ST(bool bCold)
 {
+	/* remote debugger forgets current program */
+	GdbStub_Reset();
+
 	/* Ensure MMU has default values before calling memory_init() later */
 	STMemory_Reset ( bCold );
 

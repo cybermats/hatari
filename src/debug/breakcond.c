@@ -80,6 +80,7 @@ typedef struct {
 	bool noinit;	/* prevent debugger inits on break */
 	bool lock;	/* tracing + show locked info */
 	bool deleted;   /* delayed delete flag */
+	int tag;	/* non-zero for breakpoints owned by remote debugger */
 } bc_options_t;
 
 typedef struct {
@@ -96,6 +97,7 @@ typedef struct {
 	const char *name;
 	int count;
 	int allocated;
+	int hit_tag;	/* tag of last hit tagged breakpoint, or zero */
 	bool delayed_change;
 	const debug_reason_t reason;
 } bc_breakpoints_t;
@@ -114,6 +116,58 @@ static bc_breakpoints_t DspBreakPoints = {
 static void BreakCond_DoDelayedActions(bc_breakpoints_t *bps);
 static bool BreakCond_Remove(bc_breakpoints_t *bps, int position);
 static void BreakCond_Print(FILE *fp, const char *prefix, bc_breakpoint_t *bp);
+
+
+/**
+ * Breakpoints tagged for remote debugger are kept out of the user
+ * visible breakpoint numbering. Return user index for breakpoint at
+ * given (1-based) list position, or zero for a tagged breakpoint.
+ */
+static int BreakCond_UserIndex(const bc_breakpoints_t *bps, int position)
+{
+	int i, index = 0;
+
+	if (bps->breakpoint[position-1].options.tag) {
+		return 0;
+	}
+	for (i = 0; i < position; i++) {
+		if (!bps->breakpoint[i].options.tag) {
+			index++;
+		}
+	}
+	return index;
+}
+
+/**
+ * Return (1-based) list position for given user breakpoint index,
+ * or zero if there's no such (untagged) breakpoint.
+ */
+static int BreakCond_UserPosition(const bc_breakpoints_t *bps, int index)
+{
+	int i;
+
+	for (i = 0; i < bps->count; i++) {
+		if (!bps->breakpoint[i].options.tag && --index == 0) {
+			return i + 1;
+		}
+	}
+	return 0;
+}
+
+/**
+ * Return number of user (not tagged) breakpoints
+ */
+static int BreakCond_UserCount(const bc_breakpoints_t *bps)
+{
+	int i, count = 0;
+
+	for (i = 0; i < bps->count; i++) {
+		if (!bps->breakpoint[i].options.tag) {
+			count++;
+		}
+	}
+	return count;
+}
 
 
 /**
@@ -176,7 +230,8 @@ bool BreakCond_Save(const char *filename)
 	/* save conditional breakpoints as debugger input file */
 	for (i = 0; i < CpuBreakPoints.count; i++) {
 		bc_breakpoint_t *bp = &CpuBreakPoints.breakpoint[i];
-		if (!bp->options.deleted) {
+		/* remote debugger breakpoints are session specific */
+		if (!bp->options.deleted && !bp->options.tag) {
 			BreakCond_Print(fp, "b ", bp);
 		}
 	}
@@ -359,6 +414,7 @@ static bool BreakCond_MatchBreakPoints(bc_breakpoints_t *bps)
 	/* array should not be changed while it's being traversed */
 	assert(likely(!bps->delayed_change));
 	bps->delayed_change = true;
+	bps->hit_tag = 0;
 
 	bp = bps->breakpoint;
 	for (i = 0; i < bps->count; bp++, i++) {
@@ -373,7 +429,7 @@ static bool BreakCond_MatchBreakPoints(bc_breakpoints_t *bps)
 			}
 			if (!bp->options.quiet) {
 				fprintf(stderr, "%d. %s breakpoint condition(s) matched %d times.\n",
-					i+1, bps->name, bp->hits);
+					BreakCond_UserIndex(bps, i+1), bps->name, bp->hits);
 				BreakCond_Print(stderr, "\t", bp);
 			}
 			History_Mark(bps->reason);
@@ -407,6 +463,9 @@ static bool BreakCond_MatchBreakPoints(bc_breakpoints_t *bps)
 			if (!bp->options.trace) {
 				/* index for current hit, they start from 1 */
 				hit = true;
+				if (bp->options.tag) {
+					bps->hit_tag = bp->options.tag;
+				}
 			}
 			/* continue checking breakpoints to make sure all relevant actions get performed */
 		}
@@ -450,6 +509,15 @@ int BreakCond_CpuBreakPointCount(void)
 int BreakCond_DspBreakPointCount(void)
 {
 	return DspBreakPoints.count;
+}
+
+/**
+ * Return tag of the tagged (remote debugger) CPU breakpoint which
+ * was hit on last CPU breakpoint check, or zero if none was hit.
+ */
+int BreakCond_GetCpuHitTag(void)
+{
+	return CpuBreakPoints.hit_tag;
 }
 
 
@@ -1296,6 +1364,7 @@ static bool BreakCond_Parse(const char *expression, bc_options_t *options, bool 
 		bp->options.info = options->info;
 		bp->options.lock = options->lock;
 		bp->options.noinit = options->noinit;
+		bp->options.tag = options->tag;
 		if (options->filename) {
 			bp->options.filename = strdup(options->filename);
 		}
@@ -1363,6 +1432,9 @@ static void BreakCond_Print(FILE *fp, const char *prefix, bc_breakpoint_t *bp)
 	if (bp->options.print) {
 		fprintf(fp, " :print %s", bp->options.print);
 	}
+	if (bp->options.tag) {
+		fprintf(fp, " (gdb)");
+	}
 	if (bp->options.deleted) {
 		fprintf(fp, " (deleted)");
 	}
@@ -1375,17 +1447,33 @@ static void BreakCond_Print(FILE *fp, const char *prefix, bc_breakpoint_t *bp)
 static void BreakCond_List(bc_breakpoints_t *bps)
 {
 	bc_breakpoint_t *bp;
-	int i;
+	int i, index, count;
 
-	if (!bps->count) {
+	count = BreakCond_UserCount(bps);
+	if (!count) {
 		fprintf(stderr, "No conditional %s breakpoints.\n", bps->name);
+	} else {
+		fprintf(stderr, "%d conditional %s breakpoints:\n", count, bps->name);
+	}
+	bp = bps->breakpoint;
+	for (index = 0, i = 1; i <= bps->count; bp++, i++) {
+		if (bp->options.tag) {
+			continue;
+		}
+		fprintf(stderr, "%4d:", ++index);
+		BreakCond_Print(stderr, "\t", bp);
+	}
+	if (count == bps->count) {
 		return;
 	}
-	fprintf(stderr, "%d conditional %s breakpoints:\n", bps->count, bps->name);
+	/* remote debugger breakpoints, not managed by user */
+	fprintf(stderr, "%d remote debugger (gdb) %s breakpoints:\n",
+		bps->count - count, bps->name);
 	bp = bps->breakpoint;
 	for (i = 1; i <= bps->count; bp++, i++) {
-		fprintf(stderr, "%4d:", i);
-		BreakCond_Print(stderr, "\t", bp);
+		if (bp->options.tag) {
+			BreakCond_Print(stderr, "    -:\t", bp);
+		}
 	}
 }
 
@@ -1411,7 +1499,8 @@ static bool BreakCond_Remove(bc_breakpoints_t *bps, int position)
 		return true;
 	}
 	if (!bp->options.quiet) {
-		fprintf(stderr, "Removed %s breakpoint %d:\n", bps->name, position);
+		fprintf(stderr, "Removed %s breakpoint %d:\n", bps->name,
+			BreakCond_UserIndex(bps, position));
 		BreakCond_Print(stderr, "\t", bp);
 	}
 	free(bp->expression);
@@ -1442,11 +1531,15 @@ static void BreakCond_RemoveAll(bc_breakpoints_t *bps)
 	bool removed;
 	int i;
 
+	/* remote debugger breakpoints are not user removable */
 	for (i = bps->count; i > 0; i--) {
+		if (bps->breakpoint[i-1].options.tag) {
+			continue;
+		}
 		removed = BreakCond_Remove(bps, i);
 		ASSERT_VARIABLE(removed);
 	}
-	fprintf(stderr, "%s breakpoints: %d\n", bps->name, bps->count);
+	fprintf(stderr, "%s breakpoints: %d\n", bps->name, BreakCond_UserCount(bps));
 }
 
 /**
@@ -1710,7 +1803,14 @@ bool BreakCond_Command(const char *args, bool bForDsp)
 	}
 	if (end > expression && *end == '\0' &&
 	    sscanf(expression, "%u", &position) == 1) {
-		ret = BreakCond_Remove(bps, position);
+		/* user index -> list position */
+		position = BreakCond_UserPosition(bps, position);
+		if (position) {
+			ret = BreakCond_Remove(bps, position);
+		} else {
+			fprintf(stderr, "ERROR: No such %s breakpoint.\n", bps->name);
+			ret = false;
+		}
 	} else {
 		/* add breakpoint? */
 		ret = BreakCond_Parse(expression, &options, bForDsp);
@@ -1718,6 +1818,84 @@ bool BreakCond_Command(const char *args, bool bForDsp)
 cleanup:
 	free(argscopy);
 	return ret;
+}
+
+
+/**
+ * Add a quiet CPU breakpoint with given condition expression,
+ * owned by a remote debugger and identified by given non-zero 'tag'.
+ * Several breakpoints can share the same tag.
+ * Return true for success and false for failure.
+ */
+bool BreakCond_AddTagged(const char *expression, int tag)
+{
+	bc_options_t options;
+
+	assert(tag);
+	memset(&options, 0, sizeof(options));
+	options.quiet = true;
+	options.tag = tag;
+	return BreakCond_Parse(expression, &options, false);
+}
+
+/**
+ * Return true if there's a CPU breakpoint with given tag
+ */
+bool BreakCond_TagExists(int tag)
+{
+	int i;
+
+	for (i = 0; i < CpuBreakPoints.count; i++) {
+		if (CpuBreakPoints.breakpoint[i].options.tag == tag &&
+		    !CpuBreakPoints.breakpoint[i].options.deleted) {
+			return true;
+		}
+	}
+	return false;
+}
+
+/**
+ * Re-read current value for value change tracking conditions in tagged
+ * CPU breakpoints (watchpoints), e.g. after debugger changed memory.
+ */
+void BreakCond_UpdateTaggedTracking(void)
+{
+	bc_breakpoint_t *bp = CpuBreakPoints.breakpoint;
+	bc_condition_t *condition;
+	int i, j;
+
+	for (i = 0; i < CpuBreakPoints.count; bp++, i++) {
+		if (!bp->options.tag) {
+			continue;
+		}
+		condition = bp->conditions;
+		for (j = 0; j < bp->ccount; condition++, j++) {
+			if (condition->track) {
+				condition->rvalue.value.number = BreakCond_GetValue(&(condition->lvalue));
+			}
+		}
+	}
+}
+
+/**
+ * Remove all CPU breakpoints with given tag, or all tagged
+ * CPU breakpoints if tag is zero.
+ * Return number of removed breakpoints.
+ */
+int BreakCond_RemoveTagged(int tag)
+{
+	bc_breakpoints_t *bps = &CpuBreakPoints;
+	int i, removed = 0;
+
+	for (i = bps->count; i > 0; i--) {
+		int bptag = bps->breakpoint[i-1].options.tag;
+		if (bptag && (bptag == tag || !tag)) {
+			if (BreakCond_Remove(bps, i)) {
+				removed++;
+			}
+		}
+	}
+	return removed;
 }
 
 

@@ -1407,6 +1407,7 @@ Usage:  profile &lt;subcommand&gt; [parameter]
 	Subcommands:
 		- on
 		- off
+		- status
 		- counts [count]
 		- cycles [count]
 		- i-misses [count]
@@ -1421,7 +1422,8 @@ Usage:  profile &lt;subcommand&gt; [parameter]
 		- loops &lt;file&gt; [CPU limit] [DSP limit]
 
 
-	'on' &uml; 'off' enable and disable profiling.  Data is collected
+	'on' &amp; 'off' enable and disable profiling; 'status' reports
+	whether it is enabled without changing it. Data is collected
 	until debugger is entered again, at which point profiling
 	statistics ('stats') summary is shown.
 
@@ -2072,6 +2074,233 @@ $ kcachegrind program-profile.cg
   <img src="images/kcachegrind.png" width="887" height="442"
        alt="Kcachegrind screenshot" />
 </div>
+
+
+<h3 id="Remote_debugging">Remote debugging with GDB protocol</h3>
+
+<p>
+Instead of the built-in console debugger, 68000 programs running in
+Hatari can be debugged also with external debuggers supporting the GDB
+Remote Serial Protocol, such as GDB itself, IDEs using GDB (e.g. CLion
+"Remote Debug"), or the Hatari VS Code extension (see
+<a href="https://github.com/cybermats/vscode-hatari">https://github.com/cybermats/vscode-hatari</a>).
+</p>
+
+<h4>Enabling the GDB stub</h4>
+
+<p>
+GDB protocol server ("stub") is enabled by giving Hatari a TCP port
+number to listen on:
+</p>
+<pre>
+hatari --gdb-port 1234 [other options] [program.tos]
+</pre>
+<p>
+The port is opened only on the local host (127.0.0.1) interface, and
+only one client can be connected at a time.  When a client connects,
+Hatari stops the emulation and the debugger session is handled by the
+client, instead of the console debugger.  Without a connected client,
+console debugger works as before.  When client detaches or the
+connection closes, breakpoints and watchpoints set by the client are
+removed and emulation continues.  If Hatari exits while client is
+connected, client is told the exit code.
+</p>
+<p>
+Related options:
+</p>
+<ul>
+<li>"--gdb-stop-on-exec &lt;bool&gt;" (default on): whether emulation
+    stops at the first instruction of a program started from GEMDOS HD
+    emulation drive (or given on Hatari command line).  If no client
+    has connected yet when the program is started, Hatari waits for
+    a client connection before running the program.  This makes it
+    easy to debug a program from its very first instruction, also
+    in TOS-less "--tos none" mode where programs start immediately</li>
+<li>"--gdb-offsets &lt;segments|text&gt;" (default segments): how
+    program relocation offsets are reported to the client, see below</li>
+</ul>
+
+<h4>Connecting with GDB</h4>
+
+<p>
+Use a GDB version supporting m68k, e.g. "gdb-multiarch" (packaged in
+most Linux distributions) or "m68k-elf-gdb" / "m68k-atari-mint-gdb"
+cross-debuggers:
+</p>
+<pre>
+$ hatari --gdb-port 1234 --gdb-offsets text program.tos &amp;
+$ gdb-multiarch program.elf
+(gdb) target remote localhost:1234
+(gdb) break main
+(gdb) continue
+</pre>
+<p>
+Where "program.elf" is an ELF file with the program's symbols and
+DWARF debug information (e.g. from m68k-atari-mintelf GCC toolchain,
+or "vasmm68k_mot -Felf -dwarf=3" assembler output).
+</p>
+<p>
+If GDB is used without an ELF symbol file, set architecture and byte
+order manually before connecting, otherwise GDB may show register
+values with wrong (host) byte order:
+</p>
+<pre>
+(gdb) set architecture m68k:68000
+(gdb) set endian big
+(gdb) target remote localhost:1234
+</pre>
+
+<h4>Video position stops</h4>
+
+<p>
+The GDB stub supports recurring raster stops and one-shot video blank
+stops through monitor commands.  For example:
+</p>
+<pre>
+(gdb) monitor gdb raster 100 40
+(gdb) continue
+(gdb) monitor gdb raster clear
+(gdb) monitor gdb run-vbl
+(gdb) continue
+(gdb) monitor gdb run-hbl
+(gdb) continue
+</pre>
+<p>
+The raster command stops on scanline 100 at the first CPU instruction
+boundary at or after cycle 40, once per frame.  A stop can occur a few
+cycles after the requested position because the CPU position is checked
+between instructions.  The scanline comes from Video_GetPosition(),
+which is also available as the debugger variable "RasterLine".
+</p>
+
+<h4>Program start and relocation</h4>
+
+<p>
+TOS loads and relocates programs to an address that is known only at
+run-time.  When stopped at a program start, GDB stub reports it with
+a "library" stop reason, and the client can query the program's TEXT,
+DATA and BSS segment addresses with the "qOffsets" packet.  These are
+the same values as the Hatari debugger TEXT, DATA and BSS variables.
+"qXfer:exec-file:read" returns host path of the started program.
+</p>
+<p>
+GDB applies "qOffsets" values as offsets to the symbol file sections
+when it connects, so what's needed depends on how the symbol file is
+linked:
+</p>
+<ul>
+<li>"--gdb-offsets segments" (default) reports start addresses of each
+    segment, i.e. "Text=TEXT;Data=DATA;Bss=BSS".  These are correct
+    for objects where each section starts from address zero (e.g. VS Code
+    extension uses them that way).  Note that GDB itself uses DATA offset
+    also for BSS, and warns about "unsupported offsets"</li>
+<li>"--gdb-offsets text" reports TEXT start address for all segments.
+    This is correct for executables linked to address zero, with DATA and
+    BSS following TEXT, like with normal Atari program linking.  This is
+    what you need with GDB and ELF executables from GCC</li>
+</ul>
+<p>
+Because GDB reads the offsets only when it connects, connect only after
+the program has been started, e.g. by using the (default) stop-on-exec
+functionality.  If symbols are added only after connecting, give the
+TEXT address manually, e.g. "add-symbol-file program.elf -o 0x13fc4".
+</p>
+
+<h4>Monitor commands</h4>
+
+<p>
+GDB "monitor" command (qRcmd packet) runs the given Hatari debugger
+command, and shows its output in the client, e.g:
+</p>
+<pre>
+(gdb) monitor r
+(gdb) monitor info basepage
+(gdb) monitor e a0+4
+(gdb) monitor m $ff8240-$ff8260
+</pre>
+<p>
+Debugger commands which would continue emulation (c, s, n, quit,
+reset...) are refused, use client's own execution commands instead.
+</p>
+<p>
+Stub specific monitor commands are:
+</p>
+<ul>
+<li>"monitor gdb status": show stub status, program info and the stub
+    breakpoints</li>
+<li>"monitor gdb stop-on-exec on|off": runtime toggle for stopping at
+    program start</li>
+<li>"monitor gdb offsets segments|text": runtime toggle for "qOffsets"
+    reply type</li>
+</ul>
+
+<h4>Using CLion (GDB Remote Debug)</h4>
+
+<p>
+CLion can debug (C) programs running in Hatari with its "Remote Debug"
+run configuration:
+</p>
+<ul>
+<li>Debugger: "gdb-multiarch" (or other m68k capable GDB)</li>
+<li>'target remote' args: "localhost:1234"</li>
+<li>Symbol file: the program's ELF file with debug info</li>
+<li>Sysroot / path mappings: as needed for finding the sources</li>
+</ul>
+<p>
+Start Hatari first, with "--gdb-port 1234 --gdb-offsets text" options
+and the program, then start the debug configuration.  Hatari waits at
+the program start for the connection, so that GDB gets correct
+relocation offsets and can stop at breakpoints set in program sources.
+</p>
+
+<h4>Supported packets</h4>
+
+<ul>
+<li>Registers "g", "G", "p", "P": d0-d7, a0-a7, sr (as 32-bit) and pc,
+    in that order. a7 is the currently active stack pointer.
+    Target description ("qXfer:features:read:target.xml") contains
+    those 18 m68k core registers</li>
+<li>Memory "m", "M", "X": 24-bit addresses, using the same side effect
+    free memory access as the debugger "memdump" command (also for the
+    IO area).  Unmapped memory gives an error, as do writes to the IO area
+    ($FF8000-$FFFFFF), because they would not change the emulated
+    hardware state</li>
+<li>Execution "c", "s", "C", "S", "vCont" (c/C/s/S), "?",
+    "D" (detach), "k" (quit Hatari), and 0x03 interrupt</li>
+<li>Breakpoints "Z0"/"Z1", and "Z2" write watchpoints (1-64 bytes), done
+    with Hatari's conditional breakpoints.  They are owned by the
+    client: they are listed separately (with a "(gdb)" tag) at the end
+    of the debugger "b" command breakpoint list, are not part of the user
+    breakpoint numbering, and are not removed by "b all" / "b &lt;index&gt;"
+    commands, debugger scripts, or saved to / removed by memory snapshots.
+    Client memory writes do not trigger watchpoints</li>
+<li>Queries "qSupported", "qOffsets", "qXfer:features:read",
+    "qXfer:exec-file:read", "qRcmd", "qAttached", "qC",
+    "qfThreadInfo"/"qsThreadInfo" (single thread), "qSymbol",
+    "QStartNoAckMode", "H", "T"</li>
+</ul>
+<p>
+Stop replies: breakpoint "T05swbreak", step "T05", watchpoint
+"T05watch:&lt;addr&gt;", interrupt / connect "T02", program start
+"T05library", CPU exceptions enabled with "--debug-except" option
+(bus/address error "T0a", illegal/privilege/line-A/line-F "T04", division
+by zero "T08", others "T05"), Hatari exit "W&lt;code&gt;".
+</p>
+
+<h4>Limitations</h4>
+
+<ul>
+<li>Only 68000 (ST/STFM/STE) registers are supported, no FPU, MMU or
+    68020+ registers, and DSP cannot be debugged through the stub</li>
+<li>Read and access watchpoints ("Z3", "Z4") are not supported</li>
+<li>Stub is supported only on POSIX systems (Linux, macOS), i.e. the
+    "--gdb-*" options exist only in Hatari builds with Unix socket
+    support</li>
+<li>Connection and interrupt requests are checked once per emulated
+    frame (VBL), i.e. not while emulation is paused</li>
+<li>While client has emulation stopped, Hatari window is kept
+    responsive, but no input is processed except for closing it</li>
+</ul>
 
 
 <h3>Usage examples</h3>

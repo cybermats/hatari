@@ -17,6 +17,8 @@
 #include "configuration.h"
 #include "control.h"
 #include "conv_st.h"
+#include "debugui.h"
+#include "gdbstub.h"
 #include "gui_event.h"
 #include "ikbd.h"
 #include "keymap_sdl.h"
@@ -113,6 +115,24 @@ static void GuiEvent_HandleMouseMotion(int dx, int dy)
 
 
 /**
+ * Keep window responsive while emulation is stopped outside of normal
+ * event processing (e.g. in remote debugger), without handling the events.
+ * Return true if user requested (and confirmed) quitting.
+ */
+bool GuiEvent_PollQuit(void)
+{
+	SDL_Event event;
+
+	SDL_PumpEvents();
+	if (SDL_PeepEvents(&event, 1, SDL_GETEVENT, SDL_QUIT, SDL_QUIT) > 0)
+	{
+		Main_RequestQuit(0);
+	}
+	return bQuitProgram;
+}
+
+
+/**
  * SDL message handler.
  * Here we process the SDL events (keyboard, mouse, ...) and map it to
  * Atari IKBD events.
@@ -133,6 +153,9 @@ void GuiEvent_EventHandler(void)
 		/* check remote process control */
 		remotepause = Control_CheckUpdates();
 
+		/* check remote (GDB) debugger connection */
+		GdbStub_Poll();
+
 		if ( bEmulationActive || remotepause )
 		{
 			events = SDL_PollEvent(&event);
@@ -143,7 +166,9 @@ void GuiEvent_EventHandler(void)
 			/* last (shortcut) event activated emulation? */
 			if ( bEmulationActive )
 				break;
-			events = SDL_WaitEvent(&event);
+			/* Keep servicing the GDB socket even while emulation is paused. */
+			events = GdbStub_IsEnabled() ? SDL_WaitEventTimeout(&event, 100)
+			                             : SDL_WaitEvent(&event);
 		}
 		if (!events)
 		{

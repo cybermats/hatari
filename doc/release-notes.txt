@@ -111,6 +111,8 @@ Emulator improvements:
   - Increase max lenght of accepted debugger file commands to 4K
   - Add frame pointer based "backtrace" (bt) command
   - Add MMU translation support for the "memdump" command
+  - Add GDB remote protocol server ("--gdb-port" option), for debugging
+    68000 programs with GDB, IDEs (e.g. CLion) or VS Code extension
 - Profiler:
   - Profiler skips "profile stats" output when entering debugger,
     if it showed (there was data for) a backtrace, and does not

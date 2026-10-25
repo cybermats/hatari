@@ -32,6 +32,8 @@ const char TOS_fileid[] = "Hatari tos.c";
 #include "stMemory.h"
 #include "str.h"
 #include "symbols.h"
+#include "debugui.h"
+#include "gdbstub.h"
 #include "tos.h"
 #include "lilo.h"
 #include "vdi.h"
@@ -1274,6 +1276,8 @@ int TOS_InitImage(void)
 			{
 				Main_ErrorExit("Failed to load:", psTestPrg, 1);
 			}
+			/* remote debugger may want to stop at program start */
+			GdbStub_ProgramExec(psTestPrg, offsets);
 		}
 		else
 		{

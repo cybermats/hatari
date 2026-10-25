@@ -650,7 +650,7 @@ char *Profile_Match(const char *text, int state)
 {
 	static const char *subs[] = {
 		"addresses", "callers", "caches", "counts", "cycles", "d-hits", "i-misses",
-		"loops", "off", "on", "save", "stack", "stats", "symbols"
+		"loops", "off", "on", "save", "stack", "stats", "status", "symbols"
 	};
 
 	char *ret = DebugUI_MatchHelper(subs, ARRAY_SIZE(subs), text, state);
@@ -666,6 +666,7 @@ const char Profile_Description[] =
 	"\tSubcommands:\n"
 	"\t- on\n"
 	"\t- off\n"
+	"\t- status\n"
 	"\t- counts [count]\n"
 	"\t- cycles [count]\n"
 	"\t- i-misses [count]\n"
@@ -679,7 +680,8 @@ const char Profile_Description[] =
 	"\t- save <file>\n"
 	"\t- loops <file> [CPU limit] [DSP limit]\n"
 	"\n"
-	"\t'on' & 'off' enable and disable profiling.  Data is collected\n"
+	"\t'on' & 'off' enable and disable profiling; 'status' reports\n"
+	"\twhether it is enabled without changing it. Data is collected\n"
 	"\tuntil debugger is entered again, at which point profiling\n"
 	"\tstatistics ('stats') summary is shown.\n"
 	"\n"
@@ -849,6 +851,9 @@ int Profile_Command(int nArgc, char *psArgs[], bool bForDsp)
 	} else if (strcmp(psArgs[1], "off") == 0) {
 		*enabled = false;
 		fprintf(stderr, "Profiling disabled.\n");
+
+	} else if (strcmp(psArgs[1], "status") == 0) {
+		fprintf(stderr, "Profiling %s.\n", *enabled ? "enabled" : "disabled");
 
 	} else if (strcmp(psArgs[1], "stats") == 0) {
 		if (bForDsp) {

@@ -20,7 +20,9 @@
 
 #include "avi_record.h"
 #include "configuration.h"
+#include "debugui.h"
 #include "dialog.h"
+#include "gdbstub.h"
 #include "m68000.h"
 #include "memorySnapShot.h"
 #include "options.h"
@@ -134,6 +136,9 @@ int main(int argc, char *argv[])
 	/* Run emulation */
 	Main_UnPauseEmulation();
 	M68000_Start();                 /* Start emulation */
+
+	/* tell remote debugger that emulation ended */
+	GdbStub_Exit(nQuitValue);
 
 	Main_UnInit();
 

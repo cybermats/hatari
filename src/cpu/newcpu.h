@@ -749,6 +749,7 @@ extern void (*x_do_cycles_pre)(int);
 extern void (*x_do_cycles_post)(int, uae_u32);
 #ifdef WINUAE_FOR_HATARI
 void set_x_funcs_hatari_blitter (int flag);
+void set_x_funcs_gdb_data_watch(bool enable);
 #endif
 
 extern uae_u32 REGPARAM3 x_get_disp_ea_020 (uae_u32 base, int idx) REGPARAM;

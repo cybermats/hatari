@@ -21,6 +21,7 @@ const char DebugCpu_fileid[] = "Hatari debugcpu.c";
 #include "debugui.h"
 #include "debug_priv.h"
 #include "debugcpu.h"
+#include "gdbstub.h"
 #include "evaluate.h"
 #include "hatari-glue.h"
 #include "history.h"
@@ -1465,6 +1466,9 @@ uint32_t DebugCpu_InstrCount(void)
 void DebugCpu_Check(void)
 {
 	nCpuInstructions++;
+	GdbStub_CheckCpuModel();
+	if (GdbStub_HasCallTracking())
+		GdbStub_CpuInstruction(regs.instruction_pc, M68000_GetPC(), m68k_areg(regs, 7));
 	if (bCpuProfiling)
 	{
 		Profile_CpuUpdate();
@@ -1482,17 +1486,22 @@ void DebugCpu_Check(void)
 		LOG_TRACE_DIRECT_INIT ();
 		m68k_dumpstate_file(TraceFile, &nextpc, 0xffffffff);
 	}
+	/* Evaluate conditions even when an access watchpoint fired: a simultaneous
+	 * user breakpoint can have actions, and Z2 needs its value baseline updated. */
 	if (nCpuActiveCBs)
 	{
-		if (BreakCond_MatchCpu())
-		{
+		bool pending = GdbStub_HasPendingAccessWatchpoint();
+		bool matched = BreakCond_MatchCpu();
+		if (pending || matched)
 			DebugUI(REASON_CPU_BREAKPOINT);
-			/* make sure we don't decrease step count
-			 * below, before even even getting out of here
-			 */
-			if (nCpuSteps)
-				nCpuSteps++;
-		}
+		if ((pending || matched) && nCpuSteps)
+			nCpuSteps++;
+	}
+	else if (GdbStub_HasPendingAccessWatchpoint())
+	{
+		DebugUI(REASON_CPU_BREAKPOINT);
+		if (nCpuSteps)
+			nCpuSteps++;
 	}
 	if (nCpuSteps)
 	{
@@ -1520,7 +1529,7 @@ void DebugCpu_SetDebugging(void)
 	bCpuProfiling = Profile_CpuStart();
 	nCpuActiveCBs = BreakCond_CpuBreakPointCount();
 
-	if (nCpuActiveCBs || nCpuSteps || bCpuProfiling || History_TrackCpu()
+	if (nCpuActiveCBs || GdbStub_HasAccessWatchpoints() || GdbStub_HasCallTracking() || nCpuSteps || bCpuProfiling || History_TrackCpu()
 	    || LOG_TRACE_LEVEL((TRACE_CPU_DISASM|TRACE_CPU_SYMBOLS|TRACE_CPU_REGS))
 	    || ConOutDevices)
 	{
@@ -1529,6 +1538,29 @@ void DebugCpu_SetDebugging(void)
 	}	
 	else
 		M68000_SetDebugger(false);
+}
+
+/**
+ * Set CPU single-stepping count for remote debugger, zero = continue
+ * normally. Takes effect when debugger is left.
+ */
+void DebugCpu_SetSteps(int steps)
+{
+	nCpuSteps = steps;
+}
+
+/**
+ * Update CPU breakpoint count after breakpoints have been changed
+ * outside of the debugger (e.g. by the remote debugger), and make sure
+ * CPU core calls DebugCpu_Check() if there are any breakpoints.
+ */
+void DebugCpu_BreakpointsChanged(void)
+{
+	nCpuActiveCBs = BreakCond_CpuBreakPointCount();
+	if (nCpuActiveCBs || GdbStub_HasAccessWatchpoints())
+	{
+		M68000_SetDebugger(true);
+	}
 }
 
 

@@ -42,6 +42,13 @@ static uint32_t GetLineCycles(void)
 	Video_GetPosition(&dummy1, &dummy2 , &lcycles);
 	return lcycles;
 }
+/** Return the current video scanline for debugger expressions. */
+static uint32_t GetRasterLine(void)
+{
+	int dummy1, line, dummy2;
+	Video_GetPosition(&dummy1, &line, &dummy2);
+	return line;
+}
 static uint32_t GetFrameCycles(void)
 {
 	int dummy1, dummy2, fcycles;
@@ -189,6 +196,7 @@ static const var_addr_t hatari_vars[] = {
 	{ "NextPC", (uint32_t*)GetNextPC, VALUE_TYPE_FUNCTION32, 0, "Next instruction address" },
 	{ "OsCallParam", (uint32_t*)GetOsCallParam, VALUE_TYPE_FUNCTION32, 16, "valid only on OS call opcode breakpoint" },
 	{ "PConSymbol", (uint32_t*)PConSymbol, VALUE_TYPE_FUNCTION32, 16, "1 if PC on symbol, 0 otherwise" },
+	{ "RasterLine", (uint32_t*)GetRasterLine, VALUE_TYPE_FUNCTION32, 0, "video scanline from Video_GetPosition" },
 	{ "TEXT", (uint32_t*)DebugInfo_GetTEXT, VALUE_TYPE_FUNCTION32, 0, "invalid before Desktop is up" },
 	{ "TEXTEnd", (uint32_t*)DebugInfo_GetTEXTEnd, VALUE_TYPE_FUNCTION32, 0, "invalid before Desktop is up" },
 	{ "VBL", (uint32_t*)&nVBLs, VALUE_TYPE_VAR32, sizeof(nVBLs)*8, "number of VBL interrupts" },

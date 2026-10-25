@@ -13,6 +13,10 @@
 extern void DebugCpu_Check(void);
 extern void DebugCpu_SetDebugging(void);
 
+/* for gdbstub.c */
+extern void DebugCpu_SetSteps(int steps);
+extern void DebugCpu_BreakpointsChanged(void);
+
 extern uint32_t DebugCpu_CallDepth(void);
 extern uint32_t DebugCpu_InstrCount(void);
 extern uint32_t DebugCpu_OpcodeType(void);

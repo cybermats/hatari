@@ -28,6 +28,7 @@ const char Options_fileid[] = "Hatari options.c";
 #include "control.h"
 #include "debugui.h"
 #include "event.h"
+#include "gdbstub.h"
 #include "file.h"
 #include "floppy.h"
 #include "fdc.h"
@@ -227,6 +228,9 @@ typedef enum {
 	OPT_SAVECONFIG,
 	OPT_CONTROLSOCKET,
 	OPT_CMDFIFO,
+	OPT_GDBPORT,
+	OPT_GDBSTOPONEXEC,
+	OPT_GDBOFFSETS,
 	OPT_LOGFILE,
 	OPT_LOGLEVEL,
 	OPT_ALERTLEVEL,
@@ -553,6 +557,12 @@ static const opt_t HatariOptions[] = {
 	  "<file>", "Hatari connects to given socket for commands" },
 	{ OPT_CMDFIFO, NULL, "--cmd-fifo",
 	  "<file>", "Hatari creates & reads commands from given fifo" },
+	{ OPT_GDBPORT, NULL, "--gdb-port",
+	  "<int>", "Serve GDB remote protocol on localhost port (0=off)" },
+	{ OPT_GDBSTOPONEXEC, NULL, "--gdb-stop-on-exec",
+	  "<bool>", "Stop at program start for GDB client (on=default)" },
+	{ OPT_GDBOFFSETS, NULL, "--gdb-offsets",
+	  "<x>", "GDB qOffsets reply type (x=segments/text)" },
 #endif
 	{ OPT_LOGFILE, NULL, "--log-file",
 	  "<file>", "Save log output to <file> (default=stderr)" },
@@ -2408,6 +2418,33 @@ bool Opt_ParseParameters(int argc, const char * const argv[], int *exitval)
 			if (errstr)
 			{
 				return Opt_ShowError(OPT_CMDFIFO, arg, errstr);
+			}
+			break;
+
+		case OPT_GDBPORT:
+			if (!Opt_Int(arg, OPT_GDBPORT, &val, 0, 65535, 0))
+			{
+				return false;
+			}
+			errstr = GdbStub_SetPort(val);
+			if (errstr)
+			{
+				return Opt_ShowError(OPT_GDBPORT, arg, errstr);
+			}
+			break;
+
+		case OPT_GDBSTOPONEXEC:
+			ok = Opt_Bool(arg, OPT_GDBSTOPONEXEC, &enabled);
+			if (ok)
+			{
+				GdbStub_SetStopOnExec(enabled);
+			}
+			break;
+
+		case OPT_GDBOFFSETS:
+			if (!GdbStub_SetOffsetsMode(arg))
+			{
+				return Opt_ShowError(OPT_GDBOFFSETS, arg, "Unknown offsets type");
 			}
 			break;
 

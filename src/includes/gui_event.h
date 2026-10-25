@@ -9,5 +9,6 @@
 
 void GuiEvent_WarpMouse(int x, int y, bool restore);
 void GuiEvent_EventHandler(void);
+bool GuiEvent_PollQuit(void);
 
 #endif

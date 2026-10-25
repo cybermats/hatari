@@ -22,6 +22,13 @@ extern int BreakCond_DspBreakPointCount(void);
 extern bool BreakCond_Command(const char *expression, bool bForDsp);
 extern bool BreakAddr_Command(char *expression, bool bforDsp);
 
+/* for gdbstub.c (remote debugger owned breakpoints) */
+extern bool BreakCond_AddTagged(const char *expression, int tag);
+extern int BreakCond_RemoveTagged(int tag);
+extern int BreakCond_GetCpuHitTag(void);
+extern bool BreakCond_TagExists(int tag);
+extern void BreakCond_UpdateTaggedTracking(void);
+
 /* extra functions exported for the test code */
 extern int BreakCond_MatchCpuExpression(int position, const char *expression);
 

@@ -5,6 +5,9 @@
 #include <stdio.h>
 
 #include "config.h"
+#include "main.h"
+#include "debugui.h"
+#include "gdbstub.h"
 #if HAVE_LIBREADLINE
 /* fake readline function */
 #include <readline/readline.h>
@@ -232,4 +235,19 @@ bool debug_mmu_translate_data(uint32_t addr, bool super, uint32_t *phys);
 bool debug_mmu_translate_data(uint32_t addr, bool super, uint32_t *phys)
 {
 	return false;
+}
+/** Report that the debugger test has no remote access watches. */
+bool GdbStub_HasAccessWatchpoints(void) { return false; }
+/** Report that no access watch fired in the debugger test. */
+bool GdbStub_HasPendingAccessWatchpoint(void) { return false; }
+/** Ignore CPU model changes in the debugger test. */
+void GdbStub_CheckCpuModel(void) { }
+/** Report that remote call tracking is disabled in the debugger test. */
+bool GdbStub_HasCallTracking(void) { return false; }
+/** Ignore CPU instructions in the debugger test. */
+void GdbStub_CpuInstruction(uint32_t instruction_pc, uint32_t next_pc, uint32_t sp)
+{
+	(void)instruction_pc;
+	(void)next_pc;
+	(void)sp;
 }

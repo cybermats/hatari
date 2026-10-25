@@ -66,6 +66,8 @@ const char Gemdos_fileid[] = "Hatari gemdos.c";
 #include "hatari-glue.h"
 #include "maccess.h"
 #include "symbols.h"
+#include "debugui.h"
+#include "gdbstub.h"
 
 /* Maximum supported length of a GEMDOS path: */
 #define MAX_GEMDOS_PATH 256
@@ -4599,6 +4601,9 @@ void GemDOS_PexecBpCreated(void)
 
 		/* do user-configured program exec "event" actions */
 		Event_DoPrgExecActions();
+
+		/* remote debugger may want to stop at program start */
+		GdbStub_ProgramExec(sFileName, offsets);
 	}
 	else
 	{

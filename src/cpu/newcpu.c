@@ -58,6 +58,7 @@
 #include "dsp.h"
 #include "log.h"
 #include "debugui.h"
+#include "gdbstub.h"
 #include "debugcpu.h"
 #include "stMemory.h"
 #include "blitter.h"
@@ -274,6 +275,85 @@ uae_u32 (*x_get_byte)(uaecptr);
 void (*x_put_long)(uaecptr,uae_u32);
 void (*x_put_word)(uaecptr,uae_u32);
 void (*x_put_byte)(uaecptr,uae_u32);
+
+#ifdef WINUAE_FOR_HATARI
+/* Wrap CPU data accesses, leaving instruction fetches and debugger reads alone. */
+enum { GDB_DATA_BYTE, GDB_DATA_WORD, GDB_DATA_LONG, GDB_DATA_SIZES };
+static uae_u32 (*gdb_data_get[GDB_DATA_SIZES])(uaecptr);
+static void (*gdb_data_put[GDB_DATA_SIZES])(uaecptr, uae_u32);
+static bool gdb_data_watch_wrapped;
+/** Read one data byte and notify the remote watchpoint handler. */
+static uae_u32 gdb_get_byte(uaecptr addr)
+{
+	uae_u32 value = gdb_data_get[GDB_DATA_BYTE](addr);
+	GdbStub_CpuDataAccess(addr, 1, false);
+	return value;
+}
+/** Read one data word and notify the remote watchpoint handler. */
+static uae_u32 gdb_get_word(uaecptr addr)
+{
+	uae_u32 value = gdb_data_get[GDB_DATA_WORD](addr);
+	GdbStub_CpuDataAccess(addr, 2, false);
+	return value;
+}
+/** Read one data longword and notify the remote watchpoint handler. */
+static uae_u32 gdb_get_long(uaecptr addr)
+{
+	uae_u32 value = gdb_data_get[GDB_DATA_LONG](addr);
+	GdbStub_CpuDataAccess(addr, 4, false);
+	return value;
+}
+/** Write one data byte and notify the remote watchpoint handler. */
+static void gdb_put_byte(uaecptr addr, uae_u32 value)
+{
+	gdb_data_put[GDB_DATA_BYTE](addr, value);
+	GdbStub_CpuDataAccess(addr, 1, true);
+}
+/** Write one data word and notify the remote watchpoint handler. */
+static void gdb_put_word(uaecptr addr, uae_u32 value)
+{
+	gdb_data_put[GDB_DATA_WORD](addr, value);
+	GdbStub_CpuDataAccess(addr, 2, true);
+}
+/** Write one data longword and notify the remote watchpoint handler. */
+static void gdb_put_long(uaecptr addr, uae_u32 value)
+{
+	gdb_data_put[GDB_DATA_LONG](addr, value);
+	GdbStub_CpuDataAccess(addr, 4, true);
+}
+
+/** Switch wrappers only while at least one read/access watchpoint exists.
+ * This keeps the ordinary CPU memory path unchanged when GDB is inactive. */
+void set_x_funcs_gdb_data_watch(bool enable)
+{
+	if (enable && !gdb_data_watch_wrapped && currprefs.cpu_model == 68000)
+	{
+		gdb_data_get[GDB_DATA_BYTE] = x_get_byte;
+		gdb_data_get[GDB_DATA_WORD] = x_get_word;
+		gdb_data_get[GDB_DATA_LONG] = x_get_long;
+		gdb_data_put[GDB_DATA_BYTE] = x_put_byte;
+		gdb_data_put[GDB_DATA_WORD] = x_put_word;
+		gdb_data_put[GDB_DATA_LONG] = x_put_long;
+		x_get_byte = gdb_get_byte;
+		x_get_word = gdb_get_word;
+		x_get_long = gdb_get_long;
+		x_put_byte = gdb_put_byte;
+		x_put_word = gdb_put_word;
+		x_put_long = gdb_put_long;
+		gdb_data_watch_wrapped = true;
+	}
+	else if (!enable && gdb_data_watch_wrapped)
+	{
+		x_get_byte = gdb_data_get[GDB_DATA_BYTE];
+		x_get_word = gdb_data_get[GDB_DATA_WORD];
+		x_get_long = gdb_data_get[GDB_DATA_LONG];
+		x_put_byte = gdb_data_put[GDB_DATA_BYTE];
+		x_put_word = gdb_data_put[GDB_DATA_WORD];
+		x_put_long = gdb_data_put[GDB_DATA_LONG];
+		gdb_data_watch_wrapped = false;
+	}
+}
+#endif
 
 uae_u32 (*x_cp_next_iword)(void);
 uae_u32 (*x_cp_next_ilong)(void);
@@ -1591,6 +1671,12 @@ static void set_x_funcs (void)
 			dcache_bput = put_byte030_cicheck;
 		}
 	}
+#ifdef WINUAE_FOR_HATARI
+	/* CPU setup replaces x_* functions; restore wrappers if still needed. */
+	gdb_data_watch_wrapped = false;
+	GdbStub_CheckCpuModel();
+	set_x_funcs_gdb_data_watch(GdbStub_HasAccessWatchpoints());
+#endif
 }
 
 bool can_cpu_tracer (void)

@@ -43,6 +43,7 @@ const char DebugUI_fileid[] = "Hatari debugui.c";
 #include "debugInfo.h"
 #include "debugui.h"
 #include "evaluate.h"
+#include "gdbstub.h"
 #include "history.h"
 #include "profile.h"
 #include "symbols.h"
@@ -65,6 +66,10 @@ static int parseFiles;
 
 /* to which directory to change after (potentially recursed) scripts parsing finishes */
 static char *finalDir;
+
+/* set while executing commands for a remote debugger */
+static bool bRemoteCommand;
+static bool bRemoteCommandRefused;
 
 
 /**
@@ -753,6 +758,26 @@ static int DebugUI_ParseCommand(const char *input_orig)
 		free(input);
 		return DEBUGGER_CMDDONE;
 	}
+	/* Scripts loaded through remote 'parse' also reach this function.
+	 * Keep execution control with the GDB protocol for every nested line. */
+	if (bRemoteCommand)
+	{
+		static const char *refused[] = {
+			"cont", "step", "next", "dspcont", "dspstep", "dspnext",
+			"quit", "reset"
+		};
+		int j;
+		for (j = 0; j < ARRAY_SIZE(refused); j++)
+		{
+			if (strcmp(debugCommand[cmd].sLongName, refused[j]) == 0)
+			{
+				bRemoteCommandRefused = true;
+				fprintf(stderr, "Command '%s' is not supported through remote debugger, use its own execution control commands instead.\n", psArgs[0]);
+				free(input);
+				return DEBUGGER_CMDDONE;
+			}
+		}
+	}
 
 	nArgc = 1;
 	/* argument(s) for the command */
@@ -1266,6 +1291,9 @@ void DebugUI_UnInit(void)
 bool DebugUI_DoQuitQuery(const char *info)
 {
 	char input[8];
+	/* remote debugger output is not paged */
+	if (bRemoteCommand)
+		return false;
 	fprintf(stderr, "--- q to exit %s, enter to continue --- ", info);
 	if (fgets(input, sizeof(input), stdin) == NULL ||
 	    toupper((unsigned char)input[0]) == 'Q') {
@@ -1331,6 +1359,25 @@ void DebugUI(debug_reason_t reason)
 	Screen_UngrabMouse();
 
 	DebugUI_Init();
+
+	/* remote (GDB) debugger acts as the debugger front end
+	 * instead of console, when it's connected
+	 */
+	if (GdbStub_WantsSession(reason))
+	{
+		DebugCpu_InitSession();
+		DebugDsp_InitSession();
+		Symbols_AutoLoadCurrentProgram(NULL, 0);
+		alertLevel = Log_SetAlertLevel(LOG_FATAL);
+
+		GdbStub_Session(reason);
+
+		Log_SetAlertLevel(alertLevel);
+		DebugCpu_SetDebugging();
+		DebugDsp_SetDebugging();
+		recursing = false;
+		return;
+	}
 
 	if (welcome)
 	{
@@ -1550,6 +1597,40 @@ bool DebugUI_ParseLine(const char *input)
 }
 
 /**
+ * Remote debugger (GDB stub) command line API: execute given debugger
+ * command line like the console debugger does (incl. expression
+ * expansion), except that commands which would leave the debugger
+ * (continue, step, quit...) are refused, and output isn't paged.
+ * Return false if command was refused/failed, true otherwise.
+ */
+bool DebugUI_ParseRemoteCommand(const char *input)
+{
+	char *expanded;
+	int ret;
+
+	DebugUI_Init();
+
+	expanded = DebugUI_EvaluateExpressions(input);
+	if (!expanded)
+		return false;
+
+	if (!*Str_Trim(expanded))
+	{
+		/* empty command would repeat previous command */
+		free(expanded);
+		return false;
+	}
+
+	bRemoteCommand = true;
+	bRemoteCommandRefused = false;
+	ret = DebugUI_ParseCommand(expanded);
+	bRemoteCommand = false;
+	free(expanded);
+
+	return (!bRemoteCommandRefused && ret != DEBUGGER_END);
+}
+
+/**
  * Debugger invocation based on exception
  */
 void DebugUI_Exceptions(int nr, long pc)
@@ -1575,5 +1656,6 @@ void DebugUI_Exceptions(int nr, long pc)
 	if (!(ExceptionDebugMask & ex[nr].flag))
 		return;
 	fprintf(stderr,"%s exception at 0x%lx!\n", ex[nr].name, pc);
+	GdbStub_SetException(nr + 2);
 	DebugUI(REASON_CPU_EXCEPTION);
 }
